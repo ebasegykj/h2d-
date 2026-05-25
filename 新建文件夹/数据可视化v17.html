@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>通用数据可视化by Rhycwu</title>
+    <script src="./lib/echarts@560.min.js"></script>
+    <script src="./lib/xlsx@0185.full.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2196F3;
+            --secondary-color: #4CAF50;
+            --background: #f8f9fa;
+            --text-primary: #2c3e50;
+            --border-color: #e0e0e0;
+        }
+
+        .coefficient-group {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        .coefficient-group input[type="number"] {
+            width: 80px;
+            padding: 4px;
+        }
+
+        .control-panel {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .type-selector {
+            margin-bottom: 15px;
+        }
+
+        .file-input-group {
+            display: none;
+            margin-top: 6px;
+        }
+
+        .calculator-group {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        .calculator-group input[type="text"] {
+            width: 300px;
+            padding: 4px;
+        }
+
+        .calculator-group button {
+            padding: 4px 8px;
+            margin-left: 5px;
+        }
+
+        .operator-select {
+            width: 50px;
+            padding: 4px;
+        }
+
+        button {
+            padding: 5px 5px;
+            margin-right: 10px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1976D2;
+        }
+
+        label {
+            margin-right: 15px;
+        }
+
+        select,
+        input[type="text"] {
+            padding: 5px;
+            margin: 5px 0;
+        }
+
+        .chart-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .chart-box {
+            width: 100%;
+            height: 600px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            border: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="control-panel">
+        <div class="type-selector">
+            <button id="btnTxt">📄 选择TXT</button>
+            <button id="btnExcel">📊 选择Excel</button>
+            <button id="btnDiff">📈 差分绘图</button>
+            <button id="btnStd">📉 滑动均方差</button>
+            <button id="btnMain">🏠 返回主图</button>
+        </div>
+
+        <div class="file-input-group" id="txtGroup">
+            <input type="file" id="txtInput" accept=".txt">
+            <label>🦌🌈输入列索引(从0开始):
+                <input type="text" id="txtColumns" placeholder="逗号分隔,留空默认前4列">
+            </label>
+            <label>🚓字节序：
+                <select id="endianTxt">
+                    <option value="big">高位在前🙉</option>
+                    <option value="little">🙈低位在前</option>
+                </select>
+            </label>
+            <label>📍符号标志位：
+                <input type="number" id="signBitTxt" placeholder="输入0~31,留空默认31">
+            </label>
+        </div>
+
+        <div class="file-input-group" id="excelGroup">
+            <input type="file" id="excelInput" accept=".xlsx,.xls">
+            <label>🦌输入列名:
+                <input type="text" id="columns" placeholder="逗号分隔,留空默认前4列">
+            </label>
+            <label>🚓字节序：
+                <select id="endianExcel">
+                    <option value="big">🙉高位在前</option>
+                    <option value="little">低位在前🙈</option>
+                </select>
+            </label>
+
+            <label>📍符号标志位：
+                <input type="number" id="signBitExcel" placeholder="输入0~31,留空默认31">
+            </label>
+        </div>
+
+        <div class="calculator-group">
+            <label>📊 数据处理:
+                <select id="dataOperation">
+                    <option value="none">-- 选择操作 --</option>
+                    <option value="diff">一阶差分</option>
+                    <option value="movingAvg">滑动平均</option>
+                    <option value="movingVar">滑动均方差</option>
+                    <option value="normalize">归一化(0-1)</option>
+                    <option value="cumsum">累积和</option>
+                    <option value="abs">绝对值</option>
+                </select>
+                <button id="btnApplyOperation">应用操作</button>
+            </label>
+            <label>🫸💯数据系数：
+                <input type="number" id="coefficient" value="1" step="0.1">
+            </label>
+            <label>
+                📥 滑动窗口大小:
+                <input type="number" id="windowSize" value="5" min="2" style="width: 60px;">
+            </label>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <div id="mainChart" class="chart-box"></div>
+        <div id="calcChart" class="chart-box" style="display: none;"></div>
+    </div>
+
+    <script>
+        // 应用状态管理
+        const appState = {
+            currentType: '',
+            workbook: null,
+            txtContent: null,
+            mainData: [],
+            calcData: [],
+            zoomStates: { main: { start: 0, end: 100 }, calc: { start: 0, end: 100 } },
+            selection: { A: null, B: null, current: null },
+            coefficient: 1,
+            currentChartType: 'main',
+            currentOperation: '',
+            windowSize: 5
+        };
+
+        // 预定义数据处理方法
+        const dataOperations = {
+            none: (data) => data,
+            diff: (data) => data.slice(1).map((v, i) => v - data[i]),
+            movingAvg: (data, window) => {
+                let sum = 0;
+                const result = [];
+                for (let i = 0; i < data.length; i++) {
+                    sum += data[i];
+                    if (i >= window - 1) {
+                        result.push(sum / window);
+                        sum -= data[i - window + 1];
+                    }
+                }
+                return result;
+            },
+            movingVar: (data, window) => {
+                let sum = 0, squareSum = 0;
+                const result = [];
+                for (let i = 0; i < data.length; i++) {
+                    sum += data[i];
+                    squareSum += data[i] ** 2;
+                    if (i >= window - 1) {
+                        const mean = sum / window;
+                        const variance = (squareSum / window) - (mean ** 2);
+                        result.push(variance);
+                        sum -= data[i - window + 1];
+                        squareSum -= data[i - window + 1] ** 2;
+                    }
+                }
+                return result;
+            },
+            normalize: (data) => {
+                const min = Math.min(...data);
+                const max = Math.max(...data);
+                const range = max - min;
+                return range === 0 ? data.map(() => 0) : data.map(v => (v - min) / range);
+            },
+            cumsum: (data) => {
+                let sum = 0;
+                return data.map(v => sum += v);
+            },
+            abs: (data) => data.map(v => Math.abs(v))
+        };
+
+        // 图表实例
+        const mainChart = echarts.init(document.getElementById('mainChart'));
+        let calcChart = null;
+        const BYTE_COUNT = 4;
+        const DEFAULT_SIGN_BIT = 31;
+
+        // 初始化事件监听器
+        function bindInputs(ids, handler) {
+            ids.forEach(id => document.getElementById(id).addEventListener('input', handler));
+        }
+
+        function bindClicks(ids, handler) {
+            ids.forEach(id => document.getElementById(id).addEventListener('click', handler));
+        }
+
+        function initEventListeners() {
+            // 文件类型切换
+            bindClicks(['btnTxt', 'btnExcel'], (e) => {
+                const type = e.target.id.replace('btn', '').toLowerCase();
+                showFileInput(type);
+                showMainChart();
+            });
+
+            // 文件输入处理
+            document.getElementById('txtInput').addEventListener('change', handleTxtFile);
+            document.getElementById('excelInput').addEventListener('change', handleExcelFile);
+
+            // 参数变更触发重载
+            bindInputs(['columns', 'endianExcel', 'signBitExcel'], reloadData);
+            bindInputs(['txtColumns', 'endianTxt', 'signBitTxt'], reloadData);
+
+            // 图表功能按钮
+            bindClicks(['btnDiff', 'btnStd', 'btnMain'], (e) => {
+                switch (e.target.id) {
+                    case 'btnDiff':
+                        document.getElementById('dataOperation').value = 'diff';
+                        showCalcChart();
+                        break;
+                    case 'btnStd':
+                        document.getElementById('dataOperation').value = 'movingVar';
+                        showCalcChart();
+                        break;
+                    case 'btnMain': showMainChart(); break;
+                }
+            });
+
+            // 数据处理操作应用按钮
+            document.getElementById('btnApplyOperation').addEventListener('click', showCalcChart);
+
+            // 滑动窗口监听
+            bindInputs(['windowSize'], () => {
+                appState.windowSize = parseInt(document.getElementById('windowSize').value) || 5;
+                if (appState.currentChartType === 'calc') showCalcChart();
+            });
+
+            bindInputs(['coefficient'], reloadData);
+        }
+
+        // 显示主图表
+        function showMainChart() {
+            appState.currentChartType = 'main';
+            document.getElementById('mainChart').style.display = 'block';
+            document.getElementById('calcChart').style.display = 'none';
+
+            if (mainChart) {
+                mainChart.resize();
+                mainChart.setOption(getChartOption(appState.mainData, 'main'), true);
+                updateChartInfo(appState.mainData, appState.zoomStates.main.start, appState.zoomStates.main.end, mainChart);
+
+            }
+        }
+
+        // 显示计算图表
+        function showCalcChart() {
+            if (!appState.mainData.length) return;
+
+            appState.currentChartType = 'calc';
+
+            const { start, end } = appState.zoomStates.main;
+            const startIndex = Math.floor(appState.mainData.length * start / 100);
+            const endIndex = Math.ceil(appState.mainData.length * end / 100);
+            const visibleMainData = appState.mainData.slice(startIndex, endIndex);
+
+            try {
+                // 获取窗口大小
+                const windowSize = parseInt(document.getElementById('windowSize').value) || 5;
+                appState.windowSize = windowSize;
+
+                // 获取选择的操作
+                const operation = document.getElementById('dataOperation').value;
+                appState.currentOperation = operation;
+
+                // 计算数据
+                const operationFn = dataOperations[operation] || dataOperations.none;
+                appState.calcData = operationFn(visibleMainData, windowSize);
+
+                const container = document.getElementById('calcChart');
+                container.style.display = 'block';
+                document.getElementById('mainChart').style.display = 'none';
+
+                if (!calcChart) {
+                    calcChart = echarts.init(container);
+                    initChartEvents(calcChart, 'calc');
+                }
+
+                setTimeout(() => calcChart.resize(), 0);
+
+                const calcZoomState = appState.zoomStates.calc;
+                const option = getChartOption(appState.calcData, 'calc');
+                option.dataZoom[0].start = calcZoomState.start;
+                option.dataZoom[0].end = calcZoomState.end;
+
+                // 更新图表标题显示当前操作
+                option.title.subtext = `操作: ${operation} | 窗口大小: ${windowSize}`;
+
+                calcChart.setOption(option, true);
+                updateChartInfo(appState.calcData, calcZoomState.start, calcZoomState.end, calcChart);
+            } catch (error) {
+                alert(`数据处理错误: ${error.message}`);
+                console.error(error);
+            }
+        }
+
+        // 文件类型切换
+        function showFileInput(type) {
+            appState.currentType = type;
+            document.querySelectorAll('.file-input-group').forEach(el => el.style.display = 'none');
+            document.getElementById(`${type}Group`).style.display = 'block';
+            document.getElementById(`${type}Input`).value = '';
+            appState.workbook = null;
+            appState.txtContent = null;
+            mainChart.clear();
+        }
+
+        // TXT文件处理
+        function handleTxtFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = e => {
+                let content = e.target.result;
+                const lines = content.trim().split('\n');
+
+                if (lines.length === 1) {
+                    const userInput = prompt("检测到单行数据，请输入每行的元素个数（大于1）:", "2");
+                    const n = parseInt(userInput);
+
+                    if (isNaN(n) || n < 2) {
+                        alert("输入无效，必须输入大于1的整数");
+                        return;
+                    }
+
+                    const elements = lines[0].trim().split(/\s+/);
+                    const chunked = [];
+                    for (let i = 0; i < elements.length; i += n) {
+                        const chunk = elements.slice(i, i + n);
+                        if (chunk.length === n) {
+                            chunked.push(chunk.join(' '));
+                        }
+                    }
+                    content = chunked.join('\n');
+
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const timestamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 14);
+                    a.download = `processed_${timestamp}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
+
+                appState.txtContent = content;
+                reloadData();
+            };
+            reader.readAsText(file);
+        }
+
+        // Excel文件处理
+        function handleExcelFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    appState.workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                    reloadData();
+                } catch (error) {
+                    alert(`文件读取失败: ${error.message}`);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 重新加载数据
+        function reloadData() {
+            if (!appState.currentType) return;
+
+            try {
+                const data = appState.currentType === 'excel'
+                    ? processExcelData()
+                    : processTxtData(appState.txtContent);
+                appState.mainData = data;
+                renderMainChart();
+
+                if (appState.currentChartType === 'calc') {
+                    showCalcChart();
+                }
+            } catch (error) {
+                alert(`数据处理失败: ${error.message}`);
+            }
+        }
+
+        // 处理数据
+        function processCommonData(selectedValues, byteCount, isBigEndian, signBit) {
+            const bytes = processBytes(selectedValues, byteCount, isBigEndian);
+            const value = parseInt(bytes.join(''), 16);
+            const rawValue = applySign(value, signBit);
+            const coefficient = parseFloat(document.getElementById('coefficient').value) || 1;
+            return rawValue * coefficient;
+        }
+
+        function processExcelData() {
+            const sheet = appState.workbook.Sheets[appState.workbook.SheetNames[0]];
+            const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+            const config = {
+                columns: document.getElementById('columns').value
+                    .split(',')
+                    .map(c => columnToIndex(c.trim())),
+                endian: document.getElementById('endianExcel').value === 'big',
+                signBit: parseInt(document.getElementById('signBitExcel').value, 10) || DEFAULT_SIGN_BIT
+            };
+
+            return rawData.map(row => {
+                const selected = (config.columns.length ? config.columns : [0, 1, 2, 3])
+                    .map(c => processCellValue(row[c] || '00'));
+                return processCommonData(selected, BYTE_COUNT, config.endian, config.signBit);
+            });
+        }
+
+        function processTxtData(content) {
+            const config = {
+                columns: document.getElementById('txtColumns').value
+                    .split(',')
+                    .map(c => parseInt(c.trim())),
+                endian: document.getElementById('endianTxt').value === 'big',
+                signBit: parseInt(document.getElementById('signBitTxt').value, 10) || DEFAULT_SIGN_BIT
+            };
+
+            return content.trim().split('\n').map(line => {
+                const rawCols = line.trim().split(/\s+/);
+                const selected = (config.columns.length ? config.columns : [0, 1, 2, 3])
+                    .map(c => (rawCols[c] || '00').padStart(2, '0'));
+                return processCommonData(selected, BYTE_COUNT, config.endian, config.signBit);
+            });
+        }
+
+        // 核心数据处理函数
+        function processBytes(values, byteCount, isBigEndian) {
+            const bytes = values.slice(0, byteCount);
+            if (bytes.length < byteCount) {
+                bytes.unshift(...Array(byteCount - bytes.length).fill('00'));
+            }
+            return isBigEndian ? bytes : bytes.reverse();
+        }
+
+        function applySign(value, signBit) {
+            return (value >> signBit) & 1 ? -(2 ** (signBit + 1)) + value : value;
+        }
+
+        // 列名转换
+        function columnToIndex(col) {
+            return col.toUpperCase().split('').reduce((acc, c) => acc * 26 + (c.charCodeAt(0) - 64), 0) - 1;
+        }
+
+        // 单元格处理
+        function processCellValue(cell) {
+            return String(cell)
+                .replace(/[^0-9A-Fa-f]/g, '')
+                .padStart(2, '0')
+                .toUpperCase()
+                .slice(-2);
+        }
+
+        // 图表点击处理
+        function initChartClick() {
+            mainChart.off('click');
+            mainChart.on('click', params => {
+                if (appState.selection.current && params.value !== undefined) {
+                    const value = parseFloat(params.value);
+                    appState.selection[appState.selection.current] = {
+                        value: value,
+                        index: params.dataIndex
+                    };
+                    document.getElementById(`input${appState.selection.current}`).value = value.toFixed(BYTE_COUNT);
+                    calculate();
+                    highlightPoint(params.dataIndex);
+                }
+            });
+        }
+
+        function highlightPoint(index) {
+            mainChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+            mainChart.dispatchAction({
+                type: 'highlight',
+                seriesIndex: 0,
+                dataIndex: index
+            });
+        }
+
+        // 图表事件处理
+        function initChartEvents(chartInstance, type) {
+            chartInstance.off('datazoom');
+            chartInstance.off('restore');
+
+            chartInstance.on('datazoom', params => {
+                const option = chartInstance.getOption();
+                let start = 0, end = 100;
+
+                if (option.dataZoom && option.dataZoom.length) {
+                    option.dataZoom.forEach(dz => {
+                        if (dz.start !== undefined) start = dz.start;
+                        if (dz.end !== undefined) end = dz.end;
+                    });
+                }
+
+                appState.zoomStates[type] = { start, end };
+
+                if (type === 'main') {
+                    updateChartInfo(appState.mainData, start, end, mainChart);
+                    if (calcChart && appState.currentChartType === 'calc') {
+                        showCalcChart();
+                    }
+                } else {
+                    updateChartInfo(appState.calcData, start, end, chartInstance);
+                }
+            });
+
+            chartInstance.on('restore', () => {
+                appState.zoomStates[type] = { start: 0, end: 100 };
+                updateChartInfo(appState[`${type}Data`], 0, 100, chartInstance);
+
+                if (type === 'main' && calcChart) {
+                    calcChart.dispatchAction({ type: 'restore' });
+                }
+            });
+        }
+
+        // 渲染主图表
+        function renderMainChart() {
+            const option = getChartOption(appState.mainData, 'main');
+            mainChart.setOption(option, true);
+            initChartClick();
+            initChartEvents(mainChart, 'main');
+            updateChartInfo(appState.mainData, 0, 100, mainChart);
+        }
+
+        // 更新图表信息
+        function updateChartInfo(data, start, end, chart) {
+            if (!data.length) return;
+
+            const startIndex = Math.floor(data.length * start / 100);
+            const endIndex = Math.ceil(data.length * end / 100);
+            const visibleData = data.slice(startIndex, endIndex);
+
+            chart.setOption({
+                graphic: {
+                    style: {
+                        text: visibleData.length ? [
+                            `🐉数据范围: ${startIndex + 1}-${endIndex}`,
+                            '─────────',
+                            `🏋️‍♂️最大值: ${Math.max(...visibleData).toFixed(BYTE_COUNT).padStart(11)}`,
+                            `🐔最小值: ${Math.min(...visibleData).toFixed(BYTE_COUNT).padStart(11)}`,
+                            '─────────',
+                            `🎯差值Δ: ${(Math.max(...visibleData) - Math.min(...visibleData)).toFixed(BYTE_COUNT).padStart(11)}`
+                        ].join('\n') : '无数据',
+                    }
+                }
+            });
+        }
+
+        // 获取图表配置
+        function getChartOption(data, type = 'main') {
+            const isMain = type === 'main';
+            const isCalc = type === 'calc';
+
+            return {
+                title: {
+                    text: isMain ? '🪬32位HEX数据可视化' : '📊 数据处理结果',
+                    subtext: isMain ? getSubtitle() : `操作: ${appState.currentOperation} | 窗口大小: ${appState.windowSize}`,
+                    left: 'center'
+                },
+                xAxis: {
+                    type: 'category',
+                    name: isMain ? '🎰行号' : '🎰计算序号',
+                    data: data.map((_, i) => i + 1),
+                    axisLabel: { rotate: 45 }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: isMain ? '🧸数值(十进制)' : '🪅计算结果',
+                },
+                series: [{
+                    type: 'line',
+                    data,
+                    large: true,
+                    progressive: 500,
+                    animation: false,
+                    smooth: false,
+                    lineStyle: { width: 1.5, color: isMain ? '#2196F3' : '#4CAF50' },
+                    symbol: 'circle',
+                    symbolSize: 3,
+                    markPoint: isMain ? {
+                        data: [
+                            { type: 'max', name: '最大值', itemStyle: { color: 'red' } },
+                            { type: 'min', name: '最小值', itemStyle: { color: 'green' } }
+                        ]
+                    } : null
+                }],
+                dataZoom: [{
+                    type: 'slider',
+                    start: appState.zoomStates[type].start,
+                    end: appState.zoomStates[type].end,
+                    fillerColor: `rgba(${isMain ? '33,150,243' : '76,175,80'},0.2)`,
+                    realtime: true
+                }, {
+                    type: 'inside',
+                    zoomOnMouseWheel: true
+                }],
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: params => {
+                        const { dataIndex, value } = params[0];
+                        if (isMain) {
+                            const hex = (value >>> 0).toString(16).toUpperCase().padStart(8, '0');
+                            return `索引: ${dataIndex}<br/>十进制: ${value}<br/>HEX: 0x${hex}`;
+                        }
+                        return `序号: ${dataIndex + 1}<br/>计算结果: ${value}`;
+                    }
+                },
+                toolbox: {
+                    feature: {
+                        saveAsImage: { title: '保存' },
+                        dataZoom: { title: { zoom: '缩放', back: '还原' } },
+                        restore: { title: '😊重置' },
+
+                    },
+                    itemSize: 15,
+                    itemGap: 10,
+                    left: 20,
+                    top: 20,
+                    orient: 'vertical'
+                },
+                graphic: {
+                    type: 'text',
+                    right: 20,
+                    top: 60,
+                    style: {
+                        text: '',
+                        fill: '#666',
+                        fontSize: 12,
+                        lineHeight: 18
+                    },
+                    z: 100
+                }
+            };
+        }
+
+
+
+
+        function getSubtitle() {
+            const isExcel = appState.currentType === 'excel';
+            return [
+                `😊系数x：${document.getElementById('coefficient').value}`,
+                `字节序：${document.getElementById(isExcel ? 'endianExcel' : 'endianTxt').value === 'big' ? '高位' : '低位'}`,
+                `符号标志位：${document.getElementById(isExcel ? 'signBitExcel' : 'signBitTxt').value || '31'}`,
+                `选择列：${document.getElementById(isExcel ? 'columns' : 'txtColumns').value || '前4列'}`
+            ].join(' | ');
+        }
+
+        // 初始化应用
+        function init() {
+            initEventListeners();
+            initChartEvents(mainChart, 'main');
+            initChartClick();
+        }
+
+        // 启动应用
+        init();
+    </script>
+</body>
+
+</html>
