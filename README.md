@@ -20,3 +20,5 @@ eb 90 03
 ..。
 _____________________________________
 绘图就会按填入的索引号按列绘图了。
+<img width="2078" height="1091" alt="image" src="https://github.com/user-attachments/assets/c10bb1fd-0491-47e7-852c-5cc31c5b4943" />
+
