@@ -1,5 +1,5 @@
 预览见
-https://h2d.hehyc.com
+https://ksh.hehyc.com
 就是一个方便硬件工程师做数据可视化的
 基于浏览器使用不用安装
 
